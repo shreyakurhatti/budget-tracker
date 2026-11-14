@@ -3,7 +3,11 @@
  * Communicates with the Node.js/Express SQLite backend.
  */
 
-const API_BASE = '';
+// Resolve API base URL: reads bound Vercel service URL if available, defaults to relative URL for browser
+const API_BASE =
+  typeof process !== 'undefined' && process?.env?.BACKEND_URL
+    ? String(process.env.BACKEND_URL).replace(/\/$/, '')
+    : '';
 
 const STORAGE_KEYS = {
   TRANSACTIONS_BACKUP: 'clearledger_transactions_v1',

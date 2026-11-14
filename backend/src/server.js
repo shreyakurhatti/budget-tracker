@@ -42,4 +42,6 @@ const server = app.listen(PORT, () => {
   console.log(`Frontend served from: ${frontendPath}`);
 });
 
-module.exports = { app, server };
+module.exports = app;
+module.exports.app = app;
+module.exports.server = server;
