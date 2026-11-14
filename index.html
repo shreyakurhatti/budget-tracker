@@ -157,6 +157,9 @@
 
         <!-- Main Content Viewport -->
         <main class="main-content">
+          <!-- Global Loading / Backend Connectivity Banner -->
+          <div id="app-feedback-banner" class="alert-banner hidden" role="status" style="margin-bottom: 1.5rem;"></div>
+
           <!-- VIEW 1: DASHBOARD -->
           <section id="view-dashboard" class="view-section active" aria-labelledby="page-title">
             <div class="kpi-grid">
@@ -308,7 +311,7 @@
 
           <!-- VIEW 3: ANALYTICS -->
           <section id="view-analytics" class="view-section" aria-label="Expense Analytics">
-            <div class="kpi-grid kpi-grid-3">
+            <div class="kpi-grid">
               <article class="kpi-card">
                 <div class="kpi-header">
                   <span class="kpi-label">Highest Spending Category</span>
@@ -334,6 +337,15 @@
                 </div>
                 <div id="ana-monthly-net" class="kpi-value tabular-nums">$0.00</div>
                 <div id="ana-monthly-net-meta" class="kpi-meta">Selected period income minus expenses</div>
+              </article>
+
+              <article class="kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-label">Month-over-Month Trend</span>
+                  <i data-lucide="trending-up" id="ana-mom-icon" class="kpi-icon"></i>
+                </div>
+                <div id="ana-mom-kpi-val" class="kpi-value tabular-nums">—</div>
+                <div id="ana-mom-kpi-meta" class="kpi-meta">vs. previous month</div>
               </article>
             </div>
 
@@ -393,6 +405,37 @@
                   </div>
                 </div>
                 <div id="ana-category-table-wrap" class="table-responsive"></div>
+              </section>
+            </div>
+
+            <div class="charts-grid-2" style="margin-top: 16px;">
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2 class="panel-title">Month-over-Month Spending Comparison</h2>
+                    <p id="ana-mom-subtitle" class="panel-subtitle">
+                      Spending by category compared with the previous month
+                    </p>
+                  </div>
+                </div>
+                <div class="chart-container">
+                  <canvas id="ana-mom-chart"></canvas>
+                  <div id="ana-mom-empty" class="chart-empty hidden">
+                    No expense data available for comparison.
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div>
+                    <h2 class="panel-title">Category Spending Changes</h2>
+                    <p id="ana-mom-table-subtitle" class="panel-subtitle">
+                      Detailed delta and percentage change
+                    </p>
+                  </div>
+                </div>
+                <div id="ana-mom-table-wrap" class="table-responsive"></div>
               </section>
             </div>
           </section>

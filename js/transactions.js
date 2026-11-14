@@ -655,20 +655,25 @@ export function initTransactionsModule({ onDataChange, showToast, getAllTransact
   document.getElementById('delete-modal')?.addEventListener('click', (e) => {
     if (e.target.id === 'delete-modal') closeDeleteModal();
   });
-  document.getElementById('confirm-delete-btn')?.addEventListener('click', () => {
+  document.getElementById('confirm-delete-btn')?.addEventListener('click', async () => {
     if (!pendingDeleteId) return;
-    const deleted = deleteTransaction(pendingDeleteId);
-    closeDeleteModal();
-    if (deleted) {
-      callbacks.showToast('Transaction deleted');
-      callbacks.onDataChange();
+    try {
+      const deleted = await deleteTransaction(pendingDeleteId);
+      closeDeleteModal();
+      if (deleted) {
+        callbacks.showToast('Transaction deleted');
+        await callbacks.onDataChange();
+      }
+    } catch (err) {
+      closeDeleteModal();
+      callbacks.showToast(err.message || 'Failed to delete transaction', 'error');
     }
   });
 
   // Form submission
   const txForm = document.getElementById('transaction-form');
   if (txForm) {
-    txForm.addEventListener('submit', (e) => {
+    txForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       clearFormErrors();
 
@@ -693,18 +698,22 @@ export function initTransactionsModule({ onDataChange, showToast, getAllTransact
         return;
       }
 
-      if (id) {
-        updateTransaction(id, payload);
-        callbacks.showToast('Transaction updated');
-      } else {
-        saveTransaction(payload);
-        callbacks.showToast(
-          payload.type === 'income' ? 'Income entry added' : 'Expense entry added'
-        );
-      }
+      try {
+        if (id) {
+          await updateTransaction(id, payload);
+          callbacks.showToast('Transaction updated');
+        } else {
+          await saveTransaction(payload);
+          callbacks.showToast(
+            payload.type === 'income' ? 'Income entry added' : 'Expense entry added'
+          );
+        }
 
-      closeTransactionModal();
-      callbacks.onDataChange();
+        closeTransactionModal();
+        await callbacks.onDataChange();
+      } catch (err) {
+        callbacks.showToast(err.message || 'Failed to save transaction', 'error');
+      }
     });
   }
 

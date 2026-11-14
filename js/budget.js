@@ -270,7 +270,7 @@ export function initBudgetModule({ getActiveMonth, onDataChange, showToast }) {
 
   if (!form || !input) return;
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (errEl) errEl.textContent = '';
     input.classList.remove('input-invalid');
@@ -283,8 +283,12 @@ export function initBudgetModule({ getActiveMonth, onDataChange, showToast }) {
     }
 
     const activeMonth = getActiveMonth();
-    saveBudgetForMonth(activeMonth, val);
-    showToast(`Monthly budget saved for ${formatMonthLabel(activeMonth)}`);
-    onDataChange();
+    try {
+      await saveBudgetForMonth(activeMonth, val);
+      showToast(`Monthly budget saved for ${formatMonthLabel(activeMonth)}`);
+      await onDataChange();
+    } catch (err) {
+      showToast(err.message || 'Failed to save budget', 'error');
+    }
   });
 }

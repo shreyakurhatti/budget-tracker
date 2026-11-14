@@ -14,6 +14,7 @@ import {
 let incomeExpenseChartInstance = null;
 let categoryBarChartInstance = null;
 let distributionChartInstance = null;
+let momChartInstance = null;
 
 /**
  * Computes summary analytics metrics from transactions.
@@ -385,10 +386,235 @@ function renderCategoryAllocationTable(categoryTotals) {
 }
 
 /**
+ * Computes Month-over-Month spending comparisons and category trends.
+ * @param {Array<object>} transactions
+ * @param {string} activeMonth YYYY-MM
+ */
+export function calculateMonthOverMonthSpending(transactions, activeMonth) {
+  const [year, month] = activeMonth.split('-').map(Number);
+  const prevDate = new Date(year, month - 2, 1);
+  const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+  const currentMonthLabel = formatMonthLabel(activeMonth);
+  const prevMonthLabel = formatMonthLabel(prevMonthKey);
+
+  const currentCategoryMap = new Map();
+  const prevCategoryMap = new Map();
+  let currentTotalExpenses = 0;
+  let prevTotalExpenses = 0;
+
+  transactions.forEach((tx) => {
+    if (tx.type !== 'expense') return;
+    if (tx.date.startsWith(activeMonth)) {
+      currentCategoryMap.set(tx.category, (currentCategoryMap.get(tx.category) || 0) + tx.amount);
+      currentTotalExpenses += tx.amount;
+    } else if (tx.date.startsWith(prevMonthKey)) {
+      prevCategoryMap.set(tx.category, (prevCategoryMap.get(tx.category) || 0) + tx.amount);
+      prevTotalExpenses += tx.amount;
+    }
+  });
+
+  const allCategories = new Set([...currentCategoryMap.keys(), ...prevCategoryMap.keys()]);
+  const categoriesComparison = Array.from(allCategories).map((category) => {
+    const current = currentCategoryMap.get(category) || 0;
+    const previous = prevCategoryMap.get(category) || 0;
+    const diff = current - previous;
+    let percentChange = null;
+    if (previous > 0) {
+      percentChange = ((current - previous) / previous) * 100;
+    }
+
+    return {
+      category,
+      current,
+      previous,
+      diff,
+      percentChange,
+    };
+  });
+
+  categoriesComparison.sort((a, b) => b.current - a.current || b.previous - a.previous);
+
+  const totalDiff = currentTotalExpenses - prevTotalExpenses;
+  let totalPercentChange = null;
+  if (prevTotalExpenses > 0) {
+    totalPercentChange = ((currentTotalExpenses - prevTotalExpenses) / prevTotalExpenses) * 100;
+  }
+
+  return {
+    activeMonth,
+    prevMonthKey,
+    currentMonthLabel,
+    prevMonthLabel,
+    currentTotalExpenses,
+    prevTotalExpenses,
+    totalDiff,
+    totalPercentChange,
+    categoriesComparison,
+    hasData: currentTotalExpenses > 0 || prevTotalExpenses > 0,
+  };
+}
+
+function renderMomChart(momData) {
+  const canvas = document.getElementById('ana-mom-chart');
+  const emptyEl = document.getElementById('ana-mom-empty');
+  if (!canvas) return;
+
+  if (momChartInstance) {
+    momChartInstance.destroy();
+    momChartInstance = null;
+  }
+
+  if (!momData.hasData || momData.categoriesComparison.length === 0 || typeof window.Chart === 'undefined') {
+    emptyEl?.classList.remove('hidden');
+    return;
+  }
+  emptyEl?.classList.add('hidden');
+
+  const categories = momData.categoriesComparison.map((item) => item.category);
+  const prevData = momData.categoriesComparison.map((item) => item.previous);
+  const currentData = momData.categoriesComparison.map((item) => item.current);
+
+  momChartInstance = new window.Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: categories,
+      datasets: [
+        {
+          label: momData.prevMonthLabel,
+          data: prevData,
+          backgroundColor: '#94a3b8',
+          borderRadius: 4,
+          maxBarThickness: 18,
+        },
+        {
+          label: momData.currentMonthLabel,
+          data: currentData,
+          backgroundColor: '#2563eb',
+          borderRadius: 4,
+          maxBarThickness: 18,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          align: 'end',
+          labels: {
+            boxWidth: 10,
+            boxHeight: 10,
+            color: '#475569',
+            font: { size: 12 },
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ` ${ctx.dataset.label}: ${formatCurrency(ctx.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#64748b', font: { size: 11 } },
+        },
+        y: {
+          beginAtZero: true,
+          border: { display: false },
+          grid: { color: '#f1f5f9' },
+          ticks: {
+            color: '#64748b',
+            font: { size: 11, family: 'JetBrains Mono, monospace' },
+            callback: (val) => `$${val}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+function renderMomTable(momData) {
+  const wrap = document.getElementById('ana-mom-table-wrap');
+  if (!wrap) return;
+
+  if (!momData.hasData || momData.categoriesComparison.length === 0) {
+    wrap.innerHTML = `
+      <div class="empty-state">
+        <p class="empty-state-desc">No month-over-month expense activity to compare.</p>
+      </div>
+    `;
+    return;
+  }
+
+  const rows = momData.categoriesComparison
+    .map((item) => {
+      const isIncrease = item.diff > 0;
+      const isDecrease = item.diff < 0;
+      const diffSign = isIncrease ? '+' : isDecrease ? '−' : '';
+      const diffColorClass = isIncrease ? 'amount-expense' : isDecrease ? 'amount-income' : '';
+
+      let trendBadgeHtml = '';
+      if (item.previous === 0 && item.current > 0) {
+        trendBadgeHtml = `<span style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px; background:#eff6ff; color:#2563eb;">New</span>`;
+      } else if (item.current === 0 && item.previous > 0) {
+        trendBadgeHtml = `<span style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px; background:#f0fdf4; color:#15803d;">−100% ↓</span>`;
+      } else if (item.percentChange !== null) {
+        const absPct = Math.abs(item.percentChange).toFixed(1);
+        if (isIncrease) {
+          trendBadgeHtml = `<span style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px; background:#fef2f2; color:#dc2626;">+${absPct}% ↑</span>`;
+        } else if (isDecrease) {
+          trendBadgeHtml = `<span style="font-size:11px; font-weight:600; padding:2px 6px; border-radius:4px; background:#f0fdf4; color:#15803d;">−${absPct}% ↓</span>`;
+        } else {
+          trendBadgeHtml = `<span style="font-size:11px; font-weight:500; color:#64748b;">0.0%</span>`;
+        }
+      } else {
+        trendBadgeHtml = `<span style="font-size:11px; color:#64748b;">—</span>`;
+      }
+
+      return `
+        <tr>
+          <td>
+            <span class="legend-left">
+              <span class="legend-swatch" style="background-color: ${
+                CATEGORY_COLORS[item.category] || '#64748b'
+              };"></span>
+              <span>${escapeHtml(item.category)}</span>
+            </span>
+          </td>
+          <td class="col-right tabular-nums">${escapeHtml(formatCurrency(item.previous))}</td>
+          <td class="col-right tabular-nums">${escapeHtml(formatCurrency(item.current))}</td>
+          <td class="col-right tabular-nums ${diffColorClass}">${diffSign}${escapeHtml(formatCurrency(Math.abs(item.diff)))}</td>
+          <td class="col-right">${trendBadgeHtml}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  wrap.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th class="col-right">${escapeHtml(momData.prevMonthLabel)}</th>
+          <th class="col-right">${escapeHtml(momData.currentMonthLabel)}</th>
+          <th class="col-right">Change</th>
+          <th class="col-right">Trend</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+/**
  * Renders the Analytics view.
  */
 export function renderAnalyticsView({ transactions, activeMonth }) {
   const metrics = calculateAnalyticsMetrics(transactions, activeMonth);
+  const momData = calculateMonthOverMonthSpending(transactions, activeMonth);
 
   const topCatEl = document.getElementById('ana-top-category');
   const topCatMetaEl = document.getElementById('ana-top-category-meta');
@@ -396,6 +622,11 @@ export function renderAnalyticsView({ transactions, activeMonth }) {
   const savingsMetaEl = document.getElementById('ana-savings-meta');
   const monthlyNetEl = document.getElementById('ana-monthly-net');
   const monthlyNetMetaEl = document.getElementById('ana-monthly-net-meta');
+  const momKpiVal = document.getElementById('ana-mom-kpi-val');
+  const momKpiMeta = document.getElementById('ana-mom-kpi-meta');
+  const momIcon = document.getElementById('ana-mom-icon');
+  const momSub = document.getElementById('ana-mom-subtitle');
+  const momTableSub = document.getElementById('ana-mom-table-subtitle');
 
   if (topCatEl && topCatMetaEl) {
     if (metrics.highestCategory) {
@@ -423,10 +654,52 @@ export function renderAnalyticsView({ transactions, activeMonth }) {
     )} in − ${formatCurrency(metrics.monthlyExpenses)} out)`;
   }
 
+  if (momKpiVal && momKpiMeta) {
+    if (!momData.hasData) {
+      momKpiVal.className = 'kpi-value tabular-nums';
+      momKpiVal.textContent = '—';
+      momKpiMeta.textContent = 'No expense data for comparison';
+      if (momIcon) momIcon.className = 'kpi-icon';
+    } else if (momData.prevTotalExpenses === 0) {
+      momKpiVal.className = 'kpi-value tabular-nums';
+      momKpiVal.textContent = formatCurrency(momData.currentTotalExpenses);
+      momKpiMeta.textContent = `No spending recorded in ${momData.prevMonthLabel}`;
+      if (momIcon) momIcon.className = 'kpi-icon';
+    } else {
+      const isIncrease = momData.totalDiff > 0;
+      const isDecrease = momData.totalDiff < 0;
+      const diffSign = isIncrease ? '+' : isDecrease ? '−' : '';
+      const absPct = momData.totalPercentChange !== null ? Math.abs(momData.totalPercentChange).toFixed(1) : 0;
+      momKpiVal.textContent = `${diffSign}${formatCurrency(Math.abs(momData.totalDiff))}`;
+      if (isIncrease) {
+        momKpiVal.className = 'kpi-value tabular-nums amount-expense';
+        momKpiMeta.textContent = `+${absPct}% spending increase vs. ${momData.prevMonthLabel}`;
+        if (momIcon) momIcon.className = 'kpi-icon icon-expense';
+      } else if (isDecrease) {
+        momKpiVal.className = 'kpi-value tabular-nums amount-income';
+        momKpiMeta.textContent = `−${absPct}% savings vs. ${momData.prevMonthLabel}`;
+        if (momIcon) momIcon.className = 'kpi-icon icon-income';
+      } else {
+        momKpiVal.className = 'kpi-value tabular-nums';
+        momKpiMeta.textContent = `Identical to ${momData.prevMonthLabel}`;
+        if (momIcon) momIcon.className = 'kpi-icon';
+      }
+    }
+  }
+
+  if (momSub) {
+    momSub.textContent = `${momData.currentMonthLabel} vs. ${momData.prevMonthLabel} by category`;
+  }
+  if (momTableSub) {
+    momTableSub.textContent = `Expenditure delta and percentage trend compared to ${momData.prevMonthLabel}`;
+  }
+
   renderIncomeVsExpenseChart(transactions, activeMonth);
   renderCategoryBarChart(metrics.categoryTotals);
   renderDistributionChart(transactions, activeMonth);
   renderCategoryAllocationTable(metrics.categoryTotals);
+  renderMomChart(momData);
+  renderMomTable(momData);
 
   if (window.lucide) window.lucide.createIcons();
 }

@@ -12,6 +12,7 @@ import {
 import { renderDashboardView } from './dashboard.js';
 import {
   getBudgetForMonth,
+  getCachedTransactions,
   getTransactions,
   initStorage,
   resetDemoData,
@@ -60,6 +61,33 @@ function showToast(message, variant = 'default') {
 }
 
 /**
+ * Displays a visual feedback banner (loading, error, or info) using existing styles.
+ * @param {{ visible: boolean, type?: 'healthy'|'warning'|'danger', title?: string, message?: string }} options
+ */
+function setStatusBanner({ visible, type = 'danger', title = '', message = '' }) {
+  const banner = document.getElementById('app-feedback-banner');
+  if (!banner) return;
+
+  if (!visible) {
+    banner.className = 'alert-banner hidden';
+    banner.innerHTML = '';
+    return;
+  }
+
+  const iconName = type === 'danger' ? 'alert-octagon' : type === 'warning' ? 'alert-triangle' : 'info';
+  banner.className = `alert-banner alert-banner-${type}`;
+  banner.innerHTML = `
+    <i data-lucide="${iconName}"></i>
+    <div class="alert-content">
+      <span class="alert-title">${escapeHtml(title)}</span>
+      ${message ? `<span class="alert-desc">${escapeHtml(message)}</span>` : ''}
+    </div>
+  `;
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+/**
  * Populates the Active Period month dropdown dynamically from recorded transactions.
  */
 function syncMonthSelector(transactions) {
@@ -90,7 +118,7 @@ function syncMonthSelector(transactions) {
  * Switches the visible workspace view and updates sidebar navigation state.
  * @param {string} viewName
  */
-function navigateTo(viewName) {
+async function navigateTo(viewName) {
   if (!VIEW_TITLES[viewName]) return;
   appState.activeView = viewName;
 
@@ -108,7 +136,7 @@ function navigateTo(viewName) {
   if (titleEl) titleEl.textContent = VIEW_TITLES[viewName];
 
   closeMobileSidebar();
-  refreshApplication();
+  await refreshApplication();
 }
 
 function openMobileSidebar() {
@@ -125,7 +153,7 @@ function closeMobileSidebar() {
  * Exports all stored transactions as a clean RFC-4180 CSV file.
  */
 function exportTransactionsCsv() {
-  const transactions = sortTransactions(getTransactions(), 'date-desc');
+  const transactions = sortTransactions(getCachedTransactions(), 'date-desc');
   if (transactions.length === 0) {
     showToast('No transactions available to export', 'error');
     return;
@@ -143,7 +171,7 @@ function exportTransactionsCsv() {
         tx.title,
         tx.type,
         tx.category,
-        tx.amount.toFixed(2),
+        Number(tx.amount).toFixed(2),
         tx.description,
       ]
         .map(escapeCsv)
@@ -164,41 +192,53 @@ function exportTransactionsCsv() {
 }
 
 /**
- * Reads latest state from storage and re-renders the active view & shared chrome.
+ * Reads latest state from the API and re-renders the active view & shared chrome.
  */
-function refreshApplication() {
-  const transactions = getTransactions();
-  syncMonthSelector(transactions);
+export async function refreshApplication() {
+  try {
+    const transactions = await getTransactions();
+    setStatusBanner({ visible: false });
+    syncMonthSelector(transactions);
 
-  const budgetLimit = getBudgetForMonth(appState.activeMonth);
-  const budgetStatus = calculateBudgetStatus(
-    transactions,
-    appState.activeMonth,
-    budgetLimit
-  );
+    const budgetLimit = await getBudgetForMonth(appState.activeMonth);
+    const budgetStatus = calculateBudgetStatus(
+      transactions,
+      appState.activeMonth,
+      budgetLimit
+    );
 
-  if (appState.activeView === 'dashboard') {
-    renderDashboardView({
-      transactions,
-      activeMonth: appState.activeMonth,
-      budgetStatus,
-      onEditTx: (id) => openTransactionModal('edit', id),
-      onDeleteTx: (id) => openDeleteModal(id),
-      onOpenAddModal: () => openTransactionModal('add'),
+    if (appState.activeView === 'dashboard') {
+      renderDashboardView({
+        transactions,
+        activeMonth: appState.activeMonth,
+        budgetStatus,
+        onEditTx: (id) => openTransactionModal('edit', id),
+        onDeleteTx: (id) => openDeleteModal(id),
+        onOpenAddModal: () => openTransactionModal('add'),
+      });
+    } else if (appState.activeView === 'transactions') {
+      renderTransactionsView(transactions);
+    } else if (appState.activeView === 'analytics') {
+      renderAnalyticsView({
+        transactions,
+        activeMonth: appState.activeMonth,
+      });
+    } else if (appState.activeView === 'budget') {
+      renderBudgetView({
+        transactions,
+        activeMonth: appState.activeMonth,
+        budgetLimit,
+      });
+    }
+  } catch (err) {
+    console.error('Failed to load application data:', err);
+    setStatusBanner({
+      visible: true,
+      type: 'danger',
+      title: 'Backend Connection Error',
+      message: err.message || 'Unable to communicate with the SQLite backend. Ensure the server is running.',
     });
-  } else if (appState.activeView === 'transactions') {
-    renderTransactionsView(transactions);
-  } else if (appState.activeView === 'analytics') {
-    renderAnalyticsView({
-      transactions,
-      activeMonth: appState.activeMonth,
-    });
-  } else if (appState.activeView === 'budget') {
-    renderBudgetView({
-      transactions,
-      activeMonth: appState.activeMonth,
-      budgetLimit,
-    });
+    showToast('Failed to connect to backend', 'error');
   }
 
   if (window.lucide) window.lucide.createIcons();
@@ -207,14 +247,27 @@ function refreshApplication() {
 /**
  * Bootstraps the application once the DOM is ready.
  */
-function bootstrap() {
-  initStorage();
+async function bootstrap() {
+  try {
+    setStatusBanner({
+      visible: true,
+      type: 'healthy',
+      title: 'Connecting to database...',
+      message: 'Loading financial records from backend.',
+    });
+    const migration = await initStorage();
+    if (migration && migration.migrated && migration.count > 0) {
+      showToast(`Imported ${migration.count} records from LocalStorage`);
+    }
+  } catch (err) {
+    console.warn('Migration / Init error:', err);
+  }
 
   // Initialize feature modules
   initTransactionsModule({
     onDataChange: refreshApplication,
     showToast,
-    getAllTransactions: getTransactions,
+    getAllTransactions: getCachedTransactions,
   });
 
   initBudgetModule({
@@ -225,8 +278,8 @@ function bootstrap() {
 
   // Sidebar navigation
   document.querySelectorAll('.nav-item[data-view]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      navigateTo(btn.dataset.view);
+    btn.addEventListener('click', async () => {
+      await navigateTo(btn.dataset.view);
     });
   });
 
@@ -236,9 +289,9 @@ function bootstrap() {
   document.getElementById('sidebar-backdrop')?.addEventListener('click', closeMobileSidebar);
 
   // Month selector
-  document.getElementById('active-month-select')?.addEventListener('change', (e) => {
+  document.getElementById('active-month-select')?.addEventListener('change', async (e) => {
     appState.activeMonth = e.target.value;
-    refreshApplication();
+    await refreshApplication();
   });
 
   // Primary Add Transaction CTA & Dashboard View All shortcut
@@ -248,19 +301,23 @@ function bootstrap() {
 
   document
     .getElementById('view-all-tx-btn')
-    ?.addEventListener('click', () => navigateTo('transactions'));
+    ?.addEventListener('click', async () => await navigateTo('transactions'));
 
   // Sidebar utilities
   document.getElementById('export-csv-btn')?.addEventListener('click', exportTransactionsCsv);
-  document.getElementById('reset-demo-btn')?.addEventListener('click', () => {
-    resetDemoData();
-    appState.activeMonth = getCurrentMonthKey();
-    refreshApplication();
-    showToast('Demo data restored');
+  document.getElementById('reset-demo-btn')?.addEventListener('click', async () => {
+    try {
+      await resetDemoData();
+      appState.activeMonth = getCurrentMonthKey();
+      await refreshApplication();
+      showToast('Demo data restored');
+    } catch (err) {
+      showToast(err.message || 'Failed to reset demo data', 'error');
+    }
   });
 
   // Initial render
-  refreshApplication();
+  await refreshApplication();
 }
 
 if (document.readyState === 'loading') {
